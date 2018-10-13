@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"regexp"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -24,7 +25,7 @@ type AuditMarshaller struct {
 	maxOutOfOrder int
 	attempts      int
 	filters       map[string]map[uint16][]*regexp.Regexp // { syscall: { mtype: [regexp, ...] } }
-	saddrSeq      map[string]bool
+	waitingForDNS map[string]int
 }
 
 type AuditFilter struct {
@@ -45,6 +46,7 @@ func NewAuditMarshaller(w *AuditWriter, eventMin uint16, eventMax uint16, trackM
 		logOutOfOrder: logOOO,
 		maxOutOfOrder: maxOOO,
 		filters:       make(map[string]map[uint16][]*regexp.Regexp),
+		waitingForDNS: make(map[string]int),
 	}
 
 	for _, filter := range filters {
@@ -76,25 +78,33 @@ func (a *AuditMarshaller) Consume(nlMsg *syscall.NetlinkMessage) {
 		a.detectMissing(aMsg.Seq)
 	}
 
+	val, ok := a.msgs[aMsg.Seq]
+
 	if nlMsg.Header.Type < a.eventMin || nlMsg.Header.Type > a.eventMax {
 		// Drop all audit messages that aren't things we care about or end a multi packet event
 		a.flushOld()
 		return
-	} else if nlMsg.Header.Type == EVENT_EOE {
-		el.Println("EOE Message")
-		if val, ok := a.msgs[aMsg.Seq]; ok {
-			if len(val.DnsMap) > 0 {
-		// This is end of event msg, flush the msg with that sequence and discard this one
-				a.completeMessage(aMsg.Seq)
-		}
-		}
-		// This is end of event msg, flush the msg with that sequence and discard this one
-		// a.completeMessage(aMsg.Seq)
+	} else if nlMsg.Header.Type == EVENT_EOE && !val.GotSaddr {
+		el.Println("EOE Message", aMsg.Seq)
+		a.completeMessage(aMsg.Seq)
 		return
 	}
 
-	if val, ok := a.msgs[aMsg.Seq]; ok {
+	if ok {
 		// Use the original AuditMessageGroup if we have one
+		//		el.Println("Adding msg", aMsg.Seq)
+		for _, msg := range val.Msgs {
+			if msg.Type == 1306 {
+				val.GotSaddr = true
+				start := strings.Index(msg.Data, "saddr=")
+				end := len(msg.Data)
+				ip := parseAddr(msg.Data[start+6 : end])
+				if ip != "" {
+					//el.Println("IP IS:", ip)
+					a.waitingForDNS[ip] = val.Seq
+				}
+			}
+		}
 		val.AddMessage(aMsg)
 	} else {
 		// Create a new AuditMessageGroup
@@ -107,10 +117,10 @@ func (a *AuditMarshaller) Consume(nlMsg *syscall.NetlinkMessage) {
 // Outputs any messages that are old enough
 // This is because there is no indication of multi message events coming from kaudit
 func (a *AuditMarshaller) flushOld() {
-	el.Println("Flush old")
 	now := time.Now()
 	for seq, msg := range a.msgs {
 		if msg.CompleteAfter.Before(now) || now.Equal(msg.CompleteAfter) {
+			//el.Println("Flush old", seq)
 			a.completeMessage(seq)
 		}
 	}
@@ -118,6 +128,7 @@ func (a *AuditMarshaller) flushOld() {
 
 // Write a complete message group to the configured output in json format
 func (a *AuditMarshaller) completeMessage(seq int) {
+	//el.Println("complete msg", seq)
 	var msg *AuditMessageGroup
 	var ok bool
 

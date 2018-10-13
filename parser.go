@@ -44,6 +44,8 @@ type AuditMessageGroup struct {
 	UidMap        map[string]string `json:"uid_map"`
 	DnsMap        map[string]string `json:"dnstap"`
 	Syscall       string            `json:"-"`
+	GotSaddr	  bool
+	GotDNS		  bool
 }
 
 // Creates a new message group from the details parsed from the message
@@ -100,9 +102,10 @@ func (amg *AuditMessageGroup) AddMessage(am *AuditMessage) {
 	amg.Msgs = append(amg.Msgs, am)
 	//TODO: need to find more message types that won't contain uids, also make these constants
 	switch am.Type {
-	case EXECVE, CWD, SOCKADDR:
-		// amg.mapDns(am)
+	case EXECVE, CWD:
 		// Don't map uids here
+	case SOCKADDR:
+		amg.mapDns(am)
 	case SYSCALL:
 		amg.findSyscall(am)
 		amg.mapUids(am)
@@ -134,11 +137,14 @@ func (amg *AuditMessageGroup) mapDns(am *AuditMessage) {
 
 	ip := parseAddr(saddr)
 
+
 	host, err := c.Get(ip)
 	if err == nil {
 		amg.DnsMap[ip] = string(host)
 		amg.DnsMap["time"] = fmt.Sprintf("%v", time.Now().Unix())
+		amg.GotDNS = true
 	} else {
+		amg.GotDNS = false
 		el.Printf("[%s] not in cache", ip)
 	}
 }

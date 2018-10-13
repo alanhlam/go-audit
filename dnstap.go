@@ -15,11 +15,11 @@ import (
 
 type DnsTapClient struct {
 	Listener net.Listener
-	//AuditMarshaller *AuditMarshaller
+	AuditMarshaller *AuditMarshaller
 }
 
-//func NewDnsTapClient(socket string, am *AuditMarshaller) (*DnsTapClient, error) {
-func NewDnsTapClient(socket string) (*DnsTapClient, error) {
+func NewDnsTapClient(socket string, am *AuditMarshaller) (*DnsTapClient, error) {
+//func NewDnsTapClient(socket string) (*DnsTapClient, error) {
 	os.Remove(socket)
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
@@ -27,7 +27,7 @@ func NewDnsTapClient(socket string) (*DnsTapClient, error) {
 	}
 	d := &DnsTapClient{
 		Listener: listener,
-		//AuditMarshaller: am,
+		AuditMarshaller: am,
 	}
 	l.Printf("Started dnstap listener, opened input socket: %s", socket)
 	return d, nil
@@ -84,6 +84,9 @@ func (d *DnsTapClient) cache(dt *dnstap.Dnstap) {
 				ipv4 := m.Answer[i].(*dns.A).A.String()
 				c.Set(ipv4, []byte(host))
 				el.Printf("Setting ipv4 for %s -> %s @ %v", host, ipv4, time.Now().Unix())
+				if val, ok := d.AuditMarshaller.waitingForDNS[ipv4]; ok{
+					d.AuditMarshaller.completeMessage(val)
+				}
 			case dns.TypeAAAA:
 				ipv6 := m.Answer[i].(*dns.AAAA).AAAA.String()
 				c.Set(ipv6, []byte(host))
@@ -93,6 +96,7 @@ func (d *DnsTapClient) cache(dt *dnstap.Dnstap) {
 				c.Set(cname, []byte(host))
 				el.Printf("Setting cname for %s -> %s @ %v", host, cname, time.Now().Unix())
 			}
+			
 		}
 	}
 }
