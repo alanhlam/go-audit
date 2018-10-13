@@ -33,7 +33,7 @@ type AuditMessage struct {
 	Type      uint16 `json:"type"`
 	Data      string `json:"data"`
 	Seq       int    `json:"sequence"`
-	AuditTime string `json:"timestamp"`
+	AuditTime string `json:"-"`
 }
 
 type AuditMessageGroup struct {
@@ -44,8 +44,8 @@ type AuditMessageGroup struct {
 	UidMap        map[string]string `json:"uid_map"`
 	DnsMap        map[string]string `json:"dnstap"`
 	Syscall       string            `json:"-"`
-	GotSaddr	  bool
-	GotDNS		  bool
+	gotSaddr      bool
+	//gotDNS        bool
 }
 
 // Creates a new message group from the details parsed from the message
@@ -137,15 +137,14 @@ func (amg *AuditMessageGroup) mapDns(am *AuditMessage) {
 
 	ip := parseAddr(saddr)
 
-
 	host, err := c.Get(ip)
 	if err == nil {
 		amg.DnsMap[ip] = string(host)
 		amg.DnsMap["time"] = fmt.Sprintf("%v", time.Now().Unix())
-		amg.GotDNS = true
-	} else {
-		amg.GotDNS = false
-		el.Printf("[%s] not in cache", ip)
+	//	amg.gotDNS = true
+	// } else {
+	// 	amg.gotDNS = false
+	// 	//el.Printf("[%s] not in cache, saddr was %s", ip, saddr)
 	}
 }
 

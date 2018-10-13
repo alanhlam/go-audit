@@ -84,7 +84,7 @@ func (a *AuditMarshaller) Consume(nlMsg *syscall.NetlinkMessage) {
 		// Drop all audit messages that aren't things we care about or end a multi packet event
 		a.flushOld()
 		return
-	} else if nlMsg.Header.Type == EVENT_EOE && !val.GotSaddr {
+	} else if nlMsg.Header.Type == EVENT_EOE && !val.gotSaddr {
 		el.Println("EOE Message", aMsg.Seq)
 		a.completeMessage(aMsg.Seq)
 		return
@@ -95,7 +95,7 @@ func (a *AuditMarshaller) Consume(nlMsg *syscall.NetlinkMessage) {
 		//		el.Println("Adding msg", aMsg.Seq)
 		for _, msg := range val.Msgs {
 			if msg.Type == 1306 {
-				val.GotSaddr = true
+				val.gotSaddr = true
 				start := strings.Index(msg.Data, "saddr=")
 				end := len(msg.Data)
 				ip := parseAddr(msg.Data[start+6 : end])
