@@ -4,6 +4,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/allegro/bigcache"
+	"github.com/spf13/viper"
 	"log"
 	"log/syslog"
 	"os"
@@ -14,8 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-
-	"github.com/spf13/viper"
 )
 
 var l = log.New(os.Stdout, "", 0)
@@ -339,9 +339,12 @@ func main() {
 	}
 
 	nlClient, err := NewNetlinkClient(config.GetInt("socket_buffer.receive"))
+
 	if err != nil {
 		el.Fatal(err)
 	}
+
+	dnstapEnabled := config.GetBool("dnstap.enabled")
 
 	marshaller := NewAuditMarshaller(
 		writer,
@@ -355,6 +358,27 @@ func main() {
 
 	l.Printf("Started processing events in the range [%d, %d]\n", config.GetInt("events.min"), config.GetInt("events.max"))
 
+	var dnstapClient *DnsTapClient
+
+	if dnstapEnabled {
+		cacheCfg := bigcache.Config{
+			LifeWindow:         config.GetDuration("dnstap.record_ttl"),
+			HardMaxCacheSize:   config.GetInt("dnstap.max_cache_size"),
+			MaxEntrySize:       96,
+			MaxEntriesInWindow: 1024,
+			Shards:             256,
+		}
+
+		DnsMarshaller := NewDnsAuditMarshaller(marshaller, cacheCfg)
+
+		dnstapClient, err = NewDnsTapClient(config, DnsMarshaller)
+		if err != nil {
+			el.Fatal(err)
+		}
+
+		go dnstapClient.Receive()
+	}
+
 	//Main loop. Get data from netlink and send it to the json lib for processing
 	for {
 		msg, err := nlClient.Receive()
@@ -367,6 +391,11 @@ func main() {
 			continue
 		}
 
-		marshaller.Consume(msg)
+		if dnstapClient != nil {
+			dnstapClient.DnsAuditMarshaller.Consume(msg)
+		} else {
+			marshaller.Consume(msg)
+		}
+
 	}
 }
